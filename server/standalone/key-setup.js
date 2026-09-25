@@ -252,9 +252,6 @@ function keySetupEndpoint({ sourceRoot = defaultSourceRoot } = {}) {
       server.middlewares.use('/api/setup/status', (req, res) => {
         if (req.method !== 'GET')
           return respond(res, 405, { error: 'Method not allowed' });
-        const admission = admit(req);
-        if (!admission.ok)
-          return respond(res, admission.status, { error: admission.error });
         respond(res, 200, providerStatus());
       });
       server.middlewares.use('/api/setup/keys', (req, res) => {

@@ -51,12 +51,28 @@ export default async function handler(req, res) {
   // Resolve true incoming URL
   const rawUrl =
     req.headers['x-forwarded-uri'] ||
-    req.headers['x-matched-path'] ||
     req.url ||
+    req.headers['x-matched-path'] ||
     '/';
 
   const parsedUrl = new URL(rawUrl, 'http://localhost');
   const pathname = parsedUrl.pathname;
+
+  if (pathname === '/api/debug' || rawUrl.includes('/api/debug')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        commit: '172760a',
+        rawUrl,
+        parsedPathname: pathname,
+        search: parsedUrl.search,
+        reqUrl: req.url,
+        xMatchedPath: req.headers['x-matched-path'],
+        xForwardedUri: req.headers['x-forwarded-uri'],
+      }),
+    );
+    return;
+  }
 
   let index = 0;
 
@@ -68,7 +84,9 @@ export default async function handler(req, res) {
           'Content-Type': 'application/json',
           'Cache-Control': 'no-store',
         });
-        res.end(JSON.stringify({ error: err.message || 'Internal Server Error' }));
+        res.end(
+          JSON.stringify({ error: err.message || 'Internal Server Error' }),
+        );
       }
       return;
     }
