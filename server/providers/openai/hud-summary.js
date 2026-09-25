@@ -55,7 +55,10 @@ async function generateGeminiHudSummary(geminiKey, context) {
       ],
       generationConfig: {
         temperature: 0.1,
-        maxOutputTokens: 60,
+        maxOutputTokens: 250,
+        thinkingConfig: {
+          thinkingBudget: 0,
+        },
       },
     }),
   });
@@ -65,12 +68,20 @@ async function generateGeminiHudSummary(geminiKey, context) {
     console.warn(
       `[hud-summary:gemini] upstream HTTP ${response.status}: ${errText}`,
     );
-    return null;
+    let parsedMessage = '';
+    try {
+      const parsed = JSON.parse(errText);
+      parsedMessage = parsed?.error?.message || '';
+    } catch {
+      parsedMessage = errText.slice(0, 200);
+    }
+    return { error: parsedMessage || `Gemini API HTTP ${response.status}` };
   }
 
   const data = await response.json().catch(() => ({}));
   const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  return toFiveWordHudSummary(rawText);
+  const summary = toFiveWordHudSummary(rawText);
+  return { summary };
 }
 
 async function handleHudSummary(req, res) {
@@ -125,21 +136,21 @@ async function handleHudSummary(req, res) {
 
     // 1. Prefer Gemini if configured
     if (geminiKey) {
-      const summary = await generateGeminiHudSummary(geminiKey, context);
-      if (summary) {
+      const result = await generateGeminiHudSummary(geminiKey, context);
+      if (result.summary) {
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.setHeader('Cache-Control', 'no-store');
         res.end(
           JSON.stringify({
-            summary,
+            summary: result.summary,
             provider: 'gemini',
             error: null,
           }),
         );
         return;
       }
-      // If Gemini returned null and OpenAI is available, fall through to OpenAI
+      // If Gemini errored and OpenAI is not configured, report error
       if (!openAiKey) {
         res.statusCode = 502;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -147,7 +158,7 @@ async function handleHudSummary(req, res) {
         res.end(
           JSON.stringify({
             summary: null,
-            error: 'Gemini HUD summary request failed',
+            error: result.error || 'Gemini HUD summary request failed',
           }),
         );
         return;
