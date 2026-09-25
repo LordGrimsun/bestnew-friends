@@ -28,7 +28,77 @@ function toFiveWordHudSummary(value) {
     .join(' ');
 }
 
+function getGeminiApiKey() {
+  return (
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GEMINI_KEY ||
+    ''
+  ).trim();
+}
+
+async function generateGeminiHudSummary(geminiKey, context) {
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [
+            {
+              text: `${HUD_SUMMARY_INSTRUCTIONS}\n\nContext data:\n${JSON.stringify(context)}`,
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 60,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    console.warn(
+      `[hud-summary:gemini] upstream HTTP ${response.status}: ${errText}`,
+    );
+    return null;
+  }
+
+  const data = await response.json().catch(() => ({}));
+  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  return toFiveWordHudSummary(rawText);
+}
+
 async function handleHudSummary(req, res) {
+  const geminiKey = getGeminiApiKey();
+  const openAiKey = (process.env.OPENAI_API_KEY || '').trim();
+
+  // Status check via GET
+  if (req.method === 'GET') {
+    const detectedKeys = [];
+    if (process.env.GEMINI_API_KEY) detectedKeys.push('GEMINI_API_KEY');
+    if (process.env.GOOGLE_API_KEY) detectedKeys.push('GOOGLE_API_KEY');
+    if (process.env.GEMINI_KEY) detectedKeys.push('GEMINI_KEY');
+    if (process.env.OPENAI_API_KEY) detectedKeys.push('OPENAI_API_KEY');
+
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(
+      JSON.stringify({
+        geminiConfigured: Boolean(geminiKey),
+        openAiConfigured: Boolean(openAiKey),
+        activeProvider: geminiKey ? 'gemini' : openAiKey ? 'openai' : 'none',
+        detectedKeys,
+      }),
+    );
+    return;
+  }
+
   if (req.method !== 'POST') {
     res.statusCode = 405;
     res.setHeader('Content-Type', 'application/json');
@@ -36,9 +106,9 @@ async function handleHudSummary(req, res) {
     return;
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  const keyless = keylessHudSummaryResponse(apiKey);
-  if (keyless) {
+  // If neither Gemini nor OpenAI is configured, return graceful unconfigured payload
+  if (!geminiKey && !openAiKey) {
+    const keyless = keylessHudSummaryResponse(openAiKey);
     res.statusCode = keyless.statusCode;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
@@ -46,18 +116,49 @@ async function handleHudSummary(req, res) {
     return;
   }
 
-  // Opt-in per-IP throttle (GEV_RATELIMIT_OPENAI_PER_MIN). Keyless HUD
-  // fallback has no provider cost and resolves above without consuming a
-  // paid-endpoint quota slot.
+  // Opt-in rate limiting
   if (!enforceOptInRateLimit(openAiRateLimiter(), req, res)) return;
 
   try {
     const body = await readRequestBody(req, 64 * 1024);
     const context = JSON.parse(body || '{}');
+
+    // 1. Prefer Gemini if configured
+    if (geminiKey) {
+      const summary = await generateGeminiHudSummary(geminiKey, context);
+      if (summary) {
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(
+          JSON.stringify({
+            summary,
+            provider: 'gemini',
+            error: null,
+          }),
+        );
+        return;
+      }
+      // If Gemini returned null and OpenAI is available, fall through to OpenAI
+      if (!openAiKey) {
+        res.statusCode = 502;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(
+          JSON.stringify({
+            summary: null,
+            error: 'Gemini HUD summary request failed',
+          }),
+        );
+        return;
+      }
+    }
+
+    // 2. Fall back to OpenAI
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${openAiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -80,8 +181,7 @@ async function handleHudSummary(req, res) {
     res.end(
       JSON.stringify({
         summary: summary || null,
-        // Never relay `data.error.message`: that is OpenAI's own wording, and
-        // it carries request ids, organization hints and quota phrasing.
+        provider: 'openai',
         error: response.ok ? null : 'OpenAI HUD summary request failed',
       }),
     );
@@ -91,7 +191,7 @@ async function handleHudSummary(req, res) {
     res.setHeader('Content-Type', 'application/json');
     res.end(
       JSON.stringify({
-        error: 'OpenAI HUD summary request failed',
+        error: 'AI HUD summary request failed',
       }),
     );
   }
