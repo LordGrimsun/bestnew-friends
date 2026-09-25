@@ -75,12 +75,7 @@ export const TRANSIT_BACKOFF_LADDER_MS = Object.freeze([
  */
 export function resolveTransitRoute(url) {
   const pathname = String(url || '').split('?')[0];
-  if (
-    pathname === '/feeds' ||
-    pathname === '/feeds/' ||
-    pathname === '' ||
-    pathname === '/'
-  )
+  if (pathname === '/feeds' || pathname === '/feeds/')
     return { route: 'feeds' };
   const match = /^\/(vehicles|trail)\/([^/]+)(?:\/([^/]+))?\/?$/.exec(pathname);
   if (!match) return null;

@@ -378,7 +378,10 @@ export function cycloneProxy({
       if (controller.signal.aborted) return;
       res.writeHead(status, {
         'Content-Type': 'application/json',
-        'Cache-Control': 'no-store',
+        'Cache-Control':
+          status === 200
+            ? 'public, max-age=300, s-maxage=900, stale-while-revalidate=86400'
+            : 'no-store',
         ...(status === 429 ? { 'Retry-After': '2' } : {}),
       });
       res.end(JSON.stringify(value));

@@ -175,7 +175,10 @@ export function firePerimetersProxy({
       if (res.destroyed) return;
       res.writeHead(status, {
         'Content-Type': 'application/json',
-        'Cache-Control': 'no-store',
+        'Cache-Control':
+          status === 200
+            ? 'public, max-age=180, s-maxage=600, stale-while-revalidate=86400'
+            : 'no-store',
         ...(status === 405 ? { Allow: 'GET' } : {}),
         ...(status === 429 ? { 'Retry-After': '60' } : {}),
         ...(stale ? { 'X-Data-Stale': 'true' } : {}),

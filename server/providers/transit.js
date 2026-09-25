@@ -6,8 +6,12 @@ export function transitProxy(options = {}) {
   const service = createTransitService(options);
   function install(server) {
     server.middlewares.use('/api/transit', async (req, res) => {
+      let subUrl = req.url || '/';
+      if (subUrl === '/' || subUrl === '') {
+        subUrl = '/feeds';
+      }
       const response = await service.handle({
-        url: `http://localhost/api/transit${req.url || '/'}`,
+        url: `http://localhost/api/transit${subUrl}`,
         method: req.method,
       });
       res.writeHead(response.status, Object.fromEntries(response.headers));
