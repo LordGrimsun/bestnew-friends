@@ -159,13 +159,35 @@ export function terrainHeightsProxy() {
     server.middlewares.use('/api/terrain/heights', async (req, res) => {
       const send = (status, bodyObj) => {
         if (res.headersSent) return;
-        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.writeHead(status, {
+          'Content-Type': 'application/json',
+          'Cache-Control':
+            status === 200
+              ? 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=2592000'
+              : 'no-store',
+        });
         res.end(JSON.stringify(bodyObj));
       };
       try {
         await loadDiskOnce();
         const parsedUrl = new URL(req.url || '', 'http://internal');
-        const rawPoints = parsedUrl.searchParams.get('points');
+        let rawPoints = parsedUrl.searchParams.get('points');
+        if (!rawPoints) {
+          const lat =
+            parsedUrl.searchParams.get('lat') ||
+            parsedUrl.searchParams.get('latitude');
+          const lon =
+            parsedUrl.searchParams.get('lon') ||
+            parsedUrl.searchParams.get('longitude');
+          if (
+            lat &&
+            lon &&
+            Number.isFinite(Number(lat)) &&
+            Number.isFinite(Number(lon))
+          ) {
+            rawPoints = `${lon},${lat}`;
+          }
+        }
         const points = parseTerrainPoints(rawPoints);
         if (!points) {
           send(400, {

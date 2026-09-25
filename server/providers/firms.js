@@ -175,11 +175,11 @@ export function firmsProxy() {
 
   const installMiddleware = (server) => {
     server.middlewares.use('/api/firms', async (req, res) => {
-      const sendJson = (status, obj) => {
+      const sendJson = (status, obj, cacheControl = 'no-store') => {
         if (res.headersSent) return;
         res.writeHead(status, {
           'Content-Type': 'application/json',
-          'Cache-Control': 'no-store',
+          'Cache-Control': cacheControl,
         });
         res.end(JSON.stringify(obj));
       };
@@ -190,14 +190,18 @@ export function firmsProxy() {
 
         if (subPath === '/status') {
           if (!key) {
-            sendJson(200, {
-              hasKey: false,
-              lastFetch: null,
-              count: null,
-              stale: false,
-              ttlMs: TTL_MS,
-              transactions: null,
-            });
+            sendJson(
+              200,
+              {
+                hasKey: false,
+                lastFetch: null,
+                count: null,
+                stale: false,
+                ttlMs: TTL_MS,
+                transactions: null,
+              },
+              'public, max-age=60, s-maxage=300, stale-while-revalidate=86400',
+            );
             return;
           }
           const transactions = await getTransactions(key);

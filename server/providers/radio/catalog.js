@@ -333,10 +333,10 @@ export function createRadioProxyMiddleware({
     }
   }
 
-  function sendJson(res, status, body) {
+  function sendJson(res, status, body, cacheControl = 'no-store') {
     res.writeHead(status, {
       'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
+      'Cache-Control': cacheControl,
     });
     res.end(JSON.stringify(body));
   }
@@ -351,16 +351,21 @@ export function createRadioProxyMiddleware({
       }
       try {
         const catalog = await getCatalog();
-        sendJson(res, 200, {
-          stations: catalog.stations,
-          updatedAt: catalog.updatedAt,
-          stale: catalog.stale,
-          degraded: Boolean(catalog.degraded),
-          degradedReason: catalog.degradedReason || null,
-          coverage: catalog.coverage || null,
-          acceptedGeneration: catalog.acceptedGeneration ?? null,
-          catalogInstance,
-        });
+        sendJson(
+          res,
+          200,
+          {
+            stations: catalog.stations,
+            updatedAt: catalog.updatedAt,
+            stale: catalog.stale,
+            degraded: Boolean(catalog.degraded),
+            degradedReason: catalog.degradedReason || null,
+            coverage: catalog.coverage || null,
+            acceptedGeneration: catalog.acceptedGeneration ?? null,
+            catalogInstance,
+          },
+          'public, max-age=60, s-maxage=300, stale-while-revalidate=86400',
+        );
       } catch (error) {
         sendJson(res, 503, {
           error: 'Radio directory is temporarily unavailable',

@@ -470,10 +470,25 @@ export function openSkyProxy() {
           }
         }
 
-        let upstream = await fetch(
-          'https://opensky-network.org/api/states/all?extended=1',
-          { headers },
-        );
+        let upstream;
+        try {
+          upstream = await fetch(
+            'https://opensky-network.org/api/states/all?extended=1',
+            { headers, signal: AbortSignal.timeout(3500) },
+          );
+        } catch (fetchErr) {
+          if (
+            await serveAdsbLolPointFallback(
+              req,
+              res,
+              requestedMode,
+              'opensky_fetch_timeout_regional_fallback',
+            )
+          ) {
+            return;
+          }
+          throw fetchErr;
+        }
         // Auto-mode fallback: if OAuth was rejected, retry with Basic credentials
         if (
           (upstream.status === 401 || upstream.status === 403) &&
@@ -681,15 +696,20 @@ export function openSkyProxy() {
         )
           return;
         res.writeHead(
-          502,
+          200,
           buildOpenSkyHeaders({
-            cacheStatus: 'MISS',
+            cacheStatus: 'FALLBACK',
             requestedMode,
-            usedMode: 'error',
-            reason: 'proxy_error',
+            usedMode: 'fallback',
+            reason: 'empty_fallback',
           }),
         );
-        res.end(JSON.stringify({ error: 'OpenSky proxy error' }));
+        res.end(
+          JSON.stringify({
+            time: Math.floor(Date.now() / 1000),
+            states: [],
+          }),
+        );
       }
     });
   };

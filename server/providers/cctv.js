@@ -141,7 +141,11 @@ export function cctvProxy({ sourceRoot = process.cwd() } = {}) {
         );
         const url = new URL(req.url || '/', 'http://localhost');
 
-        if (url.pathname === '/sources') {
+        if (
+          url.pathname === '/sources' ||
+          url.pathname === '/' ||
+          url.pathname === ''
+        ) {
           const body = {
             sources: sources.map((source) => ({
               id: source.id,
@@ -170,7 +174,8 @@ export function cctvProxy({ sourceRoot = process.cwd() } = {}) {
           };
           res.writeHead(200, {
             'Content-Type': 'application/json',
-            'Cache-Control': 'no-store',
+            'Cache-Control':
+              'public, max-age=300, s-maxage=900, stale-while-revalidate=86400',
           });
           res.end(JSON.stringify(body));
           return;

@@ -46,11 +46,29 @@ function militaryInstallationCacheKey(box, decimals = 3) {
 }
 
 function validMilitaryInstallationBox(params) {
-  const south = requiredFiniteQueryNumber(params, 'south');
-  const west = requiredFiniteQueryNumber(params, 'west');
-  const north = requiredFiniteQueryNumber(params, 'north');
-  const east = requiredFiniteQueryNumber(params, 'east');
+  let south = requiredFiniteQueryNumber(params, 'south');
+  let west = requiredFiniteQueryNumber(params, 'west');
+  let north = requiredFiniteQueryNumber(params, 'north');
+  let east = requiredFiniteQueryNumber(params, 'east');
+
+  if (
+    ![south, west, north, east].every(Number.isFinite) &&
+    params.has('bbox')
+  ) {
+    const raw = String(params.get('bbox') || '')
+      .split(',')
+      .map((v) => Number(v.trim()));
+    if (raw.length === 4 && raw.every(Number.isFinite)) {
+      west = raw[0];
+      south = raw[1];
+      east = raw[2];
+      north = raw[3];
+    }
+  }
+
   if (![south, west, north, east].every(Number.isFinite)) return null;
+  if (south > north) [south, north] = [north, south];
+  if (west > east) [west, east] = [east, west];
   if (
     south < -90 ||
     north > 90 ||

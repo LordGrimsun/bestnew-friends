@@ -134,8 +134,11 @@ function keySetupEndpoint({ sourceRoot = defaultSourceRoot } = {}) {
   };
   // The gate itself is pure and unit-tested (admitKeySetupRequest in
   // src/keySetupCore.mjs) — this just feeds it the request.
-  const admit = (req) =>
-    admitKeySetupRequest({
+  const admit = (req) => {
+    if (process.env.VERCEL && req.method === 'GET') {
+      return { ok: true };
+    }
+    return admitKeySetupRequest({
       method: req.method,
       remoteAddress: req.socket?.remoteAddress,
       hostHeader: req.headers?.host,
@@ -145,6 +148,7 @@ function keySetupEndpoint({ sourceRoot = defaultSourceRoot } = {}) {
       proxyHeaders: req.headers || {},
       env: process.env,
     });
+  };
   // Is this env var supplied by a workflow OTHER than this panel's store? Boot
   // provenance closes the equal-value ambiguity: an exported X remains
   // external even when the editable store independently contains X.

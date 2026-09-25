@@ -250,7 +250,7 @@ export const CCTV_SOURCE_CACHE_MS = 15 * 60 * 1000;
  * stalled upstream can't leave getCctvSources (and thus every CCTV route)
  * pending forever — a hung fetch aborts, the loader returns [], and
  * serve-stale/other packs take over. */
-export const CCTV_SOURCE_FETCH_TIMEOUT_MS = 15 * 1000;
+export const CCTV_SOURCE_FETCH_TIMEOUT_MS = 3500;
 /** Individual CCTV image fetches must settle before the active 10-second
  * client refresh cadence. A bounded miss can fall through to Street View or
  * the synthetic frame instead of leaving the browser preview pending. */

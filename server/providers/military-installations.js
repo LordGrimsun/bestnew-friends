@@ -32,7 +32,7 @@ const _militaryInstallationInFlight = new Map();
 function militaryInstallationsProxy() {
   async function refresh(box, key) {
     const bbox = `${box.south},${box.west},${box.north},${box.east}`;
-    const ql = `[out:json][timeout:20];(nwr["military"~"^(airfield|naval_base|range|barracks|base)$"](${bbox});nwr["landuse"="military"](${bbox}););out center tags geom ${MILITARY_INSTALLATION_ELEMENT_CAP};`;
+    const ql = `[out:json][timeout:8];(nwr["military"~"^(airfield|naval_base|range|barracks|base)$"](${bbox});nwr["landuse"="military"](${bbox}););out center tags geom ${MILITARY_INSTALLATION_ELEMENT_CAP};`;
     const upstream = await fetchOverpassPayload(
       `data=${encodeURIComponent(ql)}`,
       MILITARY_INSTALLATION_MAX_RESPONSE_BYTES,
@@ -149,7 +149,8 @@ function militaryInstallationsProxy() {
         const payload = await request.promise;
         res.writeHead(200, {
           'Content-Type': 'application/json',
-          'Cache-Control': 'public, max-age=60',
+          'Cache-Control':
+            'public, max-age=300, s-maxage=900, stale-while-revalidate=86400',
           'X-Military-Installations': request.shared ? 'INFLIGHT' : 'MISS',
         });
         res.end(JSON.stringify(payload));
