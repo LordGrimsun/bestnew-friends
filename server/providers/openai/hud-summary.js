@@ -41,18 +41,19 @@ async function generateGeminiHudSummary(geminiKey, context) {
   const models = [
     process.env.GEMINI_MODEL,
     'gemini-2.5-flash',
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-exp',
-    'gemini-1.5-flash',
-    'gemini-1.5-flash-latest',
+    'gemini-2.5-flash-lite',
+    'gemini-flash-latest',
+    'gemini-flash-lite-latest',
+    'gemini-3.8-flash',
   ].filter(Boolean);
 
-  let lastError = '';
+  const attempts = [];
 
   for (const model of models) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
     try {
-      const response = await fetch(url, {
+      // First attempt with standard generation config
+      let response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -67,31 +68,77 @@ async function generateGeminiHudSummary(geminiKey, context) {
           ],
           generationConfig: {
             temperature: 0.1,
-            maxOutputTokens: 250,
+            maxOutputTokens: 500,
           },
         }),
       });
 
-      if (response.ok) {
-        const data = await response.json().catch(() => ({}));
-        const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        const summary = toFiveWordHudSummary(rawText);
-        if (summary) return { summary, model };
-      } else {
-        const errText = await response.text().catch(() => '');
-        try {
-          const parsed = JSON.parse(errText);
-          lastError = `[${model}] ${parsed?.error?.message || errText}`;
-        } catch {
-          lastError = `[${model}] ${errText.slice(0, 200)}`;
+      // If bad request, retry with thinkingBudget: 0 in case thinking tokens are required to be off
+      if (!response.ok && response.status === 400) {
+        const retryResp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: `${HUD_SUMMARY_INSTRUCTIONS}\n\nContext data:\n${JSON.stringify(context)}`,
+                  },
+                ],
+              },
+            ],
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: 500,
+              thinkingConfig: {
+                thinkingBudget: 0,
+              },
+            },
+          }),
+        });
+        if (retryResp.ok) {
+          response = retryResp;
         }
       }
+
+      if (response.ok) {
+        const data = await response.json().catch(() => ({}));
+        const parts = data?.candidates?.[0]?.content?.parts || [];
+        const answerPart =
+          parts.find(
+            (p) => !p.thought && typeof p.text === 'string' && p.text.trim(),
+          ) || parts[0];
+        const rawText = answerPart?.text || '';
+        const summary = toFiveWordHudSummary(rawText);
+        if (summary) {
+          return {
+            summary,
+            model,
+            finishReason: data?.candidates?.[0]?.finishReason,
+          };
+        }
+        attempts.push({
+          model,
+          status: 200,
+          reason: 'empty_summary',
+          candidate: data?.candidates?.[0],
+        });
+      } else {
+        const errText = await response.text().catch(() => '');
+        let parsedMessage = errText.slice(0, 200);
+        try {
+          const parsed = JSON.parse(errText);
+          parsedMessage = parsed?.error?.message || parsedMessage;
+        } catch {}
+        attempts.push({ model, status: response.status, error: parsedMessage });
+      }
     } catch (err) {
-      lastError = `[${model}] ${err.message}`;
+      attempts.push({ model, error: err.message });
     }
   }
 
-  return { error: lastError || 'Gemini API request failed' };
+  return { error: 'Gemini API request failed', attempts };
 }
 
 async function handleHudSummary(req, res) {
@@ -103,6 +150,7 @@ async function handleHudSummary(req, res) {
     const parsedUrl = new URL(req.url || '/', 'http://localhost');
     const testParam = parsedUrl.searchParams.get('test');
     const modelsParam = parsedUrl.searchParams.get('models');
+    const probeModel = parsedUrl.searchParams.get('model');
 
     if (modelsParam && geminiKey) {
       try {
@@ -117,6 +165,32 @@ async function handleHudSummary(req, res) {
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.setHeader('Cache-Control', 'no-store');
         res.end(JSON.stringify({ ok: resp.ok, models: modelNames }));
+        return;
+      } catch (err) {
+        res.statusCode = 502;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+    }
+
+    if (probeModel && geminiKey) {
+      try {
+        const resp = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${probeModel}:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: 'Five words describing Tokyo' }] }],
+            }),
+          },
+        );
+        const data = await resp.json().catch(() => ({}));
+        res.statusCode = resp.ok ? 200 : resp.status || 502;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(JSON.stringify({ ok: resp.ok, model: probeModel, data }));
         return;
       } catch (err) {
         res.statusCode = 502;
