@@ -1,5 +1,29 @@
 /** Read a request body with a hard byte cap; throws { code:'BODY_TOO_LARGE' } past the cap. */
 async function readRequestBodyCapped(req, maxBytes) {
+  if (req.body !== undefined && req.body !== null) {
+    if (Buffer.isBuffer(req.body)) {
+      if (req.body.length > maxBytes) {
+        const err = new Error('Request body too large');
+        err.code = 'BODY_TOO_LARGE';
+        throw err;
+      }
+      return req.body;
+    }
+    const buf = Buffer.from(
+      typeof req.body === 'string' ? req.body : JSON.stringify(req.body),
+      'utf8',
+    );
+    if (buf.length > maxBytes) {
+      const err = new Error('Request body too large');
+      err.code = 'BODY_TOO_LARGE';
+      throw err;
+    }
+    return buf;
+  }
+  if (req.readableEnded) {
+    return Buffer.alloc(0);
+  }
+
   const chunks = [];
   let total = 0;
   for await (const chunk of req) {
@@ -15,6 +39,17 @@ async function readRequestBodyCapped(req, maxBytes) {
 }
 
 function readRequestBody(req, maxBytes = 1024 * 1024) {
+  if (req.body !== undefined && req.body !== null) {
+    if (typeof req.body === 'string') return Promise.resolve(req.body);
+    if (Buffer.isBuffer(req.body))
+      return Promise.resolve(req.body.toString('utf8'));
+    if (typeof req.body === 'object')
+      return Promise.resolve(JSON.stringify(req.body));
+  }
+  if (req.readableEnded) {
+    return Promise.resolve('');
+  }
+
   return new Promise((resolve, reject) => {
     let total = 0;
     let bodyTooLarge = false;

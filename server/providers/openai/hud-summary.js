@@ -40,9 +40,11 @@ function getGeminiApiKey() {
 async function generateGeminiHudSummary(geminiKey, context) {
   const models = [
     process.env.GEMINI_MODEL,
-    'gemini-3.8-flash',
+    'gemini-2.5-flash',
     'gemini-2.0-flash',
+    'gemini-2.0-flash-exp',
     'gemini-1.5-flash',
+    'gemini-1.5-flash-latest',
   ].filter(Boolean);
 
   let lastError = '';
@@ -74,18 +76,18 @@ async function generateGeminiHudSummary(geminiKey, context) {
         const data = await response.json().catch(() => ({}));
         const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
         const summary = toFiveWordHudSummary(rawText);
-        if (summary) return { summary };
+        if (summary) return { summary, model };
       } else {
         const errText = await response.text().catch(() => '');
         try {
           const parsed = JSON.parse(errText);
-          lastError = parsed?.error?.message || errText;
+          lastError = `[${model}] ${parsed?.error?.message || errText}`;
         } catch {
-          lastError = errText.slice(0, 200);
+          lastError = `[${model}] ${errText.slice(0, 200)}`;
         }
       }
     } catch (err) {
-      lastError = err.message;
+      lastError = `[${model}] ${err.message}`;
     }
   }
 
@@ -98,6 +100,49 @@ async function handleHudSummary(req, res) {
 
   // Status check via GET
   if (req.method === 'GET') {
+    const parsedUrl = new URL(req.url || '/', 'http://localhost');
+    const testParam = parsedUrl.searchParams.get('test');
+    const modelsParam = parsedUrl.searchParams.get('models');
+
+    if (modelsParam && geminiKey) {
+      try {
+        const resp = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`,
+        );
+        const data = await resp.json().catch(() => ({}));
+        const modelNames = Array.isArray(data?.models)
+          ? data.models.map((m) => m.name?.replace('models/', ''))
+          : data;
+        res.statusCode = resp.ok ? 200 : resp.status || 502;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(JSON.stringify({ ok: resp.ok, models: modelNames }));
+        return;
+      } catch (err) {
+        res.statusCode = 502;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+    }
+
+    if (testParam && geminiKey) {
+      const testResult = await generateGeminiHudSummary(geminiKey, {
+        place: 'Tokyo',
+        nearbyPlaces: ['Tokyo Bay', 'Shibuya'],
+      });
+      res.statusCode = testResult.summary ? 200 : 502;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      res.end(
+        JSON.stringify({
+          ...testResult,
+          provider: 'gemini',
+        }),
+      );
+      return;
+    }
+
     const detectedKeys = [];
     if (process.env.GEMINI_API_KEY) detectedKeys.push('GEMINI_API_KEY');
     if (process.env.GOOGLE_API_KEY) detectedKeys.push('GOOGLE_API_KEY');
@@ -204,13 +249,14 @@ async function handleHudSummary(req, res) {
         error: response.ok ? null : 'OpenAI HUD summary request failed',
       }),
     );
-  } catch {
-    console.warn('[hud-summary] request failed');
+  } catch (err) {
+    console.warn('[hud-summary] request failed:', err);
     res.statusCode = 502;
     res.setHeader('Content-Type', 'application/json');
     res.end(
       JSON.stringify({
         error: 'AI HUD summary request failed',
+        details: err?.message || String(err),
       }),
     );
   }
