@@ -38,50 +38,58 @@ function getGeminiApiKey() {
 }
 
 async function generateGeminiHudSummary(geminiKey, context) {
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
+  const models = [
+    process.env.GEMINI_MODEL,
+    'gemini-3.8-flash',
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+  ].filter(Boolean);
+
+  let lastError = '';
+
+  for (const model of models) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
             {
-              text: `${HUD_SUMMARY_INSTRUCTIONS}\n\nContext data:\n${JSON.stringify(context)}`,
+              parts: [
+                {
+                  text: `${HUD_SUMMARY_INSTRUCTIONS}\n\nContext data:\n${JSON.stringify(context)}`,
+                },
+              ],
             },
           ],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: 250,
-        thinkingConfig: {
-          thinkingBudget: 0,
-        },
-      },
-    }),
-  });
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 250,
+          },
+        }),
+      });
 
-  if (!response.ok) {
-    const errText = await response.text().catch(() => '');
-    console.warn(
-      `[hud-summary:gemini] upstream HTTP ${response.status}: ${errText}`,
-    );
-    let parsedMessage = '';
-    try {
-      const parsed = JSON.parse(errText);
-      parsedMessage = parsed?.error?.message || '';
-    } catch {
-      parsedMessage = errText.slice(0, 200);
+      if (response.ok) {
+        const data = await response.json().catch(() => ({}));
+        const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        const summary = toFiveWordHudSummary(rawText);
+        if (summary) return { summary };
+      } else {
+        const errText = await response.text().catch(() => '');
+        try {
+          const parsed = JSON.parse(errText);
+          lastError = parsed?.error?.message || errText;
+        } catch {
+          lastError = errText.slice(0, 200);
+        }
+      }
+    } catch (err) {
+      lastError = err.message;
     }
-    return { error: parsedMessage || `Gemini API HTTP ${response.status}` };
   }
 
-  const data = await response.json().catch(() => ({}));
-  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  const summary = toFiveWordHudSummary(rawText);
-  return { summary };
+  return { error: lastError || 'Gemini API request failed' };
 }
 
 async function handleHudSummary(req, res) {
